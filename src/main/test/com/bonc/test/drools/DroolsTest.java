@@ -1,12 +1,10 @@
 package com.bonc.test.drools;
 
 import com.bonc.test.drools.utils.FileManager;
-import org.apache.commons.io.FileUtils;
-import org.appformer.maven.integration.MavenRepository;
 import org.drools.compiler.kie.builder.impl.InternalKieModule;
-import org.drools.core.audit.ThreadedWorkingMemoryFileLogger;
 import org.drools.devguide.eshop.model.Customer;
 import org.drools.devguide.eshop.model.Order;
+import org.junit.Test;
 import org.kie.api.KieServices;
 import org.kie.api.builder.KieBuilder;
 import org.kie.api.builder.KieFileSystem;
@@ -16,19 +14,19 @@ import org.kie.api.builder.model.KieModuleModel;
 import org.kie.api.runtime.KieContainer;
 import org.kie.api.runtime.KieSession;
 import org.kie.scanner.KieMavenRepository;
-import static org.hamcrest.CoreMatchers.is;
-import static org.hamcrest.CoreMatchers.notNullValue;
-import static org.junit.Assert.assertThat;
 
 import java.io.File;
 import java.io.IOException;
 import java.util.Arrays;
 
 import static java.util.stream.Collectors.joining;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.CoreMatchers.*;
 
-public class Main {
+public class DroolsTest {
 
-    public static void main(String[] args) throws IOException, InterruptedException {
+    @Test
+    public void testDeploy() throws Exception {
         KieMavenRepository repository = KieMavenRepository.getKieMavenRepository();
 
         Customer customerA = new Customer();
@@ -65,7 +63,46 @@ public class Main {
         calculateAndAssertDiscount(customerB, orderB, kieSession, 25.0);
     }
 
-    private static void calculateAndAssertDiscount(Customer customer, Order order, KieSession ksession, double expectedDiscount) {
+    @Test
+    public void testInstall() throws Exception {
+        KieMavenRepository repository = KieMavenRepository.getKieMavenRepository();
+
+        Customer customerA = new Customer();
+        customerA.setCategory(Customer.Category.SILVER);
+        Order orderA = new Order();
+        orderA.setCustomer(customerA);
+
+        Customer customerB = new Customer();
+
+        customerB.setCategory(Customer.Category.SILVER);
+        Order orderB = new Order();
+        orderB.setCustomer(customerB);
+
+        String groupId = "com.bonc.test.drools";
+        String artifactId = "test01";
+        String version = "0.1-SNAPSHOT";
+
+        KieServices ks = KieServices.Factory.get();
+        ReleaseId releaseId = ks.newReleaseId(groupId, artifactId, version);
+
+        InternalKieModule originalKJar = createKieJar(ks, releaseId, createDiscountRuleForSilverCustomers(10.0));
+        repository.installArtifact(releaseId, originalKJar, createKPom(releaseId));
+
+        KieContainer kieContainer = ks.newKieContainer(releaseId);
+        KieScanner scanner = ks.newKieScanner(kieContainer);
+        KieSession kieSession = kieContainer.newKieSession();
+
+        calculateAndAssertDiscount(customerA, orderA, kieSession, 10.0);
+
+        InternalKieModule newKJar = createKieJar(ks, releaseId, createDiscountRuleForSilverCustomers(25.0));
+        repository.installArtifact(releaseId, newKJar, createKPom(releaseId));
+
+        scanner.scanNow();
+
+        calculateAndAssertDiscount(customerB, orderB, kieSession, 25.0);
+    }
+
+    private void calculateAndAssertDiscount(Customer customer, Order order, KieSession ksession, double expectedDiscount) {
         ksession.insert(customer);
         ksession.insert(order);
         ksession.fireAllRules();
@@ -74,14 +111,14 @@ public class Main {
         assertThat(order.getDiscount().getPercentage(), is(expectedDiscount));
     }
 
-    private static File createKPom(ReleaseId releaseId) throws IOException {
+    private File createKPom(ReleaseId releaseId) throws IOException {
         FileManager fileManager = new FileManager();
         File pomFile = fileManager.newFile("pom.xml");
         fileManager.write(pomFile, getPom(releaseId));
         return pomFile;
     }
 
-    private static InternalKieModule createKieJar(KieServices ks, ReleaseId releaseId, String... rules) {
+    private InternalKieModule createKieJar(KieServices ks, ReleaseId releaseId, String... rules) {
 
         KieFileSystem kfs = ks.newKieFileSystem();
         KieModuleModel kproj = ks.newKieModuleModel();
@@ -103,7 +140,7 @@ public class Main {
         return (InternalKieModule) kieBuilder.getKieModule();
     }
 
-    private static String getPom(ReleaseId releaseId, ReleaseId... dependencies) {
+    private String getPom(ReleaseId releaseId, ReleaseId... dependencies) {
         StringBuilder pomBuilder = new StringBuilder();
 
         pomBuilder.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
@@ -143,7 +180,7 @@ public class Main {
         return pomBuilder.toString();
     }
 
-    private static String createDiscountRuleForSilverCustomers(double discount) {
+    private String createDiscountRuleForSilverCustomers(double discount) {
         StringBuilder ruleBuilder = new StringBuilder();
         ruleBuilder.append("rule 'Silver Customer - Discount'\n");
         ruleBuilder.append("when\n");
